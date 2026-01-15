@@ -1,0 +1,4 @@
+PUSHER_APP_ID = "2094262"
+PUSHER_KEY = "6c018693bd0498693df3"
+PUSHER_SECRET = "9a0bfffb0c5ec8bba7fa"
+PUSHER_CLUSTER = "eu" # e.g., 'us2' or 'eu'
