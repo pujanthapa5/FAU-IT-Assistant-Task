@@ -14,12 +14,12 @@ st.set_page_config(
     layout="wide"
 )
 st.markdown("""
-<style>
-.stApp { background-color: #0e1117; }
-.metric-card { background-color: #262730; padding: 20px; border-radius: 10px; border: 1px solid #41444e; }
-.metric-value { font-size: 2.5rem; font-weight: bold; color: #ffffff; }
-.metric-label { font-size: 1rem; color: #a0a0a0; }
-</style>
+    <style>
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        div.block-container {padding-top: 1rem;} /* Moves data up to use all space */
+    </style>
 """, unsafe_allow_html=True)
 
 
@@ -62,74 +62,44 @@ def get_receiver():
 
 # Start Receiver
 receiver = get_receiver()
-# --- Main Streamlit Logic ---
-st.title("⚡ Real-Time Sensor Dashboard")
-# Check Config
-if config.PUSHER_KEY == "YOUR_PUSHER_KEY_HERE":
-    st.error("⚠️ Please update `config.py` with your actual Pusher Credentials!")
-    st.stop()
-# Initialize Session State for Dataframe (View State)
-if 'sensor_df' not in st.session_state:
-    st.session_state.sensor_df = pd.DataFrame(columns=['timestamp', 'room', 'temperature', 'humidity'])
-# Process new data from queue
-new_data_list = []
+
+if 'history' not in st.session_state: st.session_state.history = []
+if 'latest' not in st.session_state: st.session_state.latest = {}
+
+# 3. Memory Protection (Capping the data)
 while not data_queue.empty():
-    new_data_list.append(data_queue.get())
-if new_data_list:
-    new_df = pd.DataFrame(new_data_list)
-    new_df = new_df[['timestamp', 'room', 'temperature', 'humidity']]
-    st.session_state.sensor_df = pd.concat([st.session_state.sensor_df, new_df], ignore_index=True)
-    # Limit history
-    if len(st.session_state.sensor_df) > 1000:
-        st.session_state.sensor_df = st.session_state.sensor_df.iloc[-1000:]
-# Sidebar
-with st.sidebar:
-    st.header("Configuration")
-    selected_room = st.selectbox("Select Room Filter", ["All Rooms"] + [f"Room {i}" for i in range(1, 11)])
-    if st.button("Clear History"):
-        st.session_state.sensor_df = pd.DataFrame(columns=['timestamp', 'room', 'temperature', 'humidity'])
-        st.rerun()
-    st.markdown("---")
-    st.text("Logs are printed to terminal.")
-# Filtering
-df = st.session_state.sensor_df.copy()
-if selected_room != "All Rooms":
-    df = df[df['room'].astype(str) == selected_room]
-# Layout
-if not df.empty:
-    latest = df.iloc[-1]
-    col1, col2, col3 = st.columns(3)
+    item = data_queue.get()
+    room = item.get('room')
+    if room:
+        st.session_state.latest[room] = item
+        st.session_state.history.append([item['timestamp'], room, item['temperature'], item['humidity']])
 
-    with col1:
-        st.markdown(
-            f'<div class="metric-card"><div class="metric-label">Latest Update</div><div class="metric-value" style="font-size: 1.5rem">{latest["timestamp"].strftime("%H:%M:%S")}</div><div class="metric-label">{latest["room"]}</div></div>',
-            unsafe_allow_html=True)
-    with col2:
-        color = "#ff4b4b" if float(latest['temperature']) > 25 else "#00c0f2"
-        st.markdown(
-            f'<div class="metric-card"><div class="metric-label">Temperature</div><div class="metric-value" style="color: {color}">{latest["temperature"]}°C</div></div>',
-            unsafe_allow_html=True)
-    with col3:
-        st.markdown(
-            f'<div class="metric-card"><div class="metric-label">Humidity</div><div class="metric-value" style="color: #00c0f2">{latest["humidity"]}%</div></div>',
-            unsafe_allow_html=True)
-    st.subheader("📈 Live Trends")
-    tab1, tab2 = st.tabs(["Temperature", "Humidity"])
-    with tab1:
-        st.line_chart(df, x='timestamp', y='temperature', color='room', height=400)
-    with tab2:
-        st.line_chart(df, x='timestamp', y='humidity', color='room', height=400)
+    # 🚨 HARD LIMIT: Only keep 50 rows. Without PyArrow, this is the safest size.
+    if len(st.session_state.history) > 50:
+        st.session_state.history = st.session_state.history[-50:]
 
-    with st.expander("View Raw Data"):
-        st.dataframe(df.sort_values(by='timestamp', ascending=False), use_container_width=True)
-else:
-    st.info("Waiting for data... (Check terminal for connection logs)")
-    st.markdown("""
-    **Troubleshooting:**
-    1. Ensure `config.py` has valid keys.
-    2. Ensure the Sender script is running.
-    3. Check if the Sender writes to **exact** channels: `room-1`, `room-2`, etc.
-    4. Check if the Sender uses event name: `new-message`.
-    """)
-time.sleep(1)
+# 4. Simple Kiosk Display
+st.title("🧪 Lab Sensor Live Analytics")
+rooms = ["Room 1", "Room 2", "Room 3"]
+cols = st.columns(3)
+
+# Build a simple dataframe for charts (fast enough without pyarrow at 50 rows)
+df = pd.DataFrame(st.session_state.history, columns=["Time", "Room", "Temp", "Hum"])
+
+for i, room in enumerate(rooms):
+    with cols[i]:
+        room_data = st.session_state.latest.get(room)
+        if room_data:
+            # Big numbers for the hall
+            st.metric(label=f"📍 {room}", value=f"{room_data['temperature']}°C", delta=f"{room_data['humidity']}% Hum")
+
+            # Simple line chart (Native Streamlit = Low CPU)
+            room_df = df[df['Room'] == room]
+            if not room_df.empty:
+                st.line_chart(room_df.set_index('Time')['Temp'], height=200)
+        else:
+            st.info(f"Connecting to {room}...")
+
+# 5. Heartbeat (Refresh every 5 seconds)
+time.sleep(5)
 st.rerun()
