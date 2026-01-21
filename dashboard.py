@@ -1,12 +1,13 @@
 import streamlit as st
-import pandas as pd
 import time
 from datetime import datetime
 import queue
 import logging
 from reciever import PusherSensorReceiver
 import config
-import altair as alt
+
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # Configure page
 st.set_page_config(
@@ -14,6 +15,10 @@ st.set_page_config(
     page_icon="🌡️",
     layout="wide"
 )
+
+# 5. Heartbeat (Refresh every 5 seconds)
+# Using standard st.rerun() loop as requested
+
 st.markdown("""
     <style>
         #MainMenu {visibility: hidden;}
@@ -23,17 +28,11 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# Use session_state or a normal global variable instead of caching
+if 'data_queue' not in st.session_state:
+    st.session_state.data_queue = queue.Queue()
 
-# --- Thread-Safe Data Handling ---
-# We use st.cache_resource to create a global queue that persists across reruns
-# and is accessible safely from the background thread.
-@st.cache_resource
-def get_data_queue_v2():
-    return queue.Queue()
-
-
-# Get the shared queue instance
-data_queue = get_data_queue_v2()
+data_queue = st.session_state.data_queue
 
 
 # Callback function (Runs in Background Thread)
@@ -51,26 +50,17 @@ def on_message_received(data):
     data_queue.put(data)
 
 
-# --- Receiver Setup ---
-@st.cache_resource
-def get_receiver_v2():
-    # Make sure we use INFO level logging to see connection status in console
-    # Note: Streamlit captures stdout, so we should see logs in terminal
+if 'receiver' not in st.session_state:
     receiver = PusherSensorReceiver(
         api_key=config.PUSHER_KEY,
         cluster=config.PUSHER_CLUSTER,
         log_level=logging.INFO
     )
-
     channels = [f'room-{i}' for i in range(1, 4)]
-
-    # Start connection
     receiver.connect(channels, on_message_received)
-    return receiver
-
-
-# Start Receiver
-receiver = get_receiver_v2()
+    st.session_state.receiver = receiver
+else:
+    receiver = st.session_state.receiver
 
 if 'history' not in st.session_state: st.session_state.history = []
 if 'latest' not in st.session_state: st.session_state.latest = {}
@@ -81,7 +71,13 @@ while not data_queue.empty():
     room = item.get('room')
     if room:
         st.session_state.latest[room] = item
-        st.session_state.history.append([item['timestamp'], room, item['temperature'], item['humidity']])
+        # Store as dict directly for Altair
+        st.session_state.history.append({
+            "Time": item['timestamp'],
+            "Room": room,
+            "Temp": item['temperature'],
+            "Hum": item['humidity']
+        })
 
     # 🚨 HARD LIMIT: Only keep 50 rows. Without PyArrow, this is the safest size.
     if len(st.session_state.history) > 50:
@@ -104,9 +100,10 @@ st.markdown(
 )
 st.markdown("---")
 
-# Build a simple dataframe for charts (fast enough without pyarrow at 50 rows)
+# Build a simple list of dicts (fast enough without pyarrow at 50 rows)
 # History contains 'room-1', 'room-2' etc. as it comes directly from data queue
-df = pd.DataFrame(st.session_state.history, columns=["Time", "Room", "Temp", "Hum"])
+# We just use the list directly
+history_data = st.session_state.history
 
 
 def get_status(value, min_val, max_val):
@@ -119,19 +116,67 @@ def get_status(value, min_val, max_val):
     return "WARNING", "⚠️"
 
 
-def make_dual_axis_chart(data):
-    """Creates a dual-axis chart for Temp and Humidity using Altair."""
-    base = alt.Chart(data).encode(x=alt.X('Time:T', axis=alt.Axis(title=None, format='%H:%M:%S')))
+def make_split_charts(data):
+    times = [d['Time'].strftime("%H:%M:%S") for d in data]
+    temps = [d['Temp'] for d in data]
+    hums = [d['Hum'] for d in data]
 
-    line_temp = base.mark_line(color='orange').encode(
-        y=alt.Y('Temp:Q', axis=alt.Axis(title='Temp (°C)', titleColor='orange'))
+    # Two rows, shared x-axis
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.15
     )
 
-    line_hum = base.mark_line(color='#5276A7').encode(
-        y=alt.Y('Hum:Q', axis=alt.Axis(title='Hum (%)', titleColor='#5276A7'))
+    # Temperature Trend (Top)
+    fig.add_trace(
+        go.Scatter(
+            x=times, y=temps,
+            mode="lines+markers",
+            line=dict(color="orange", width=3),
+            marker=dict(size=6),
+            name="Temperature Trend"
+        ),
+        row=1, col=1
     )
 
-    return alt.layer(line_temp, line_hum).resolve_scale(y='independent').properties(height=250)
+    # Humidity Trend (Bottom)
+    fig.add_trace(
+        go.Scatter(
+            x=times, y=hums,
+            mode="lines+markers",
+            line=dict(color="blue", width=3),
+            marker=dict(size=6),
+            name="Humidity Trend"
+        ),
+        row=2, col=1
+    )
+
+    # Minimal layout (safe for older Plotly)
+    fig.update_layout(
+        height=700,
+        showlegend=False
+    )
+
+    # Titles for each subplot (safe method)
+    fig['layout']['annotations'] = [
+        dict(
+            x=0.5, y=1.05,
+            xref='paper', yref='paper',
+            text='Temperature Trend',
+            showarrow=False,
+            font=dict(size=20)
+        ),
+        dict(
+            x=0.5, y=0.45,
+            xref='paper', yref='paper',
+            text='Humidity Trend',
+            showarrow=False,
+            font=dict(size=20)
+        )
+    ]
+
+    return fig
 
 
 # Main Display Loop
@@ -162,12 +207,13 @@ for i, (room_display_name, room_id) in enumerate(ordered_rooms):
                 unsafe_allow_html=True
             )
 
-            # Filter history for this room
-            room_df = df[df['Room'] == room_id]
+            # Filter history for this room (list comprehension instead of pandas)
+            room_data_list = [d for d in history_data if d['Room'] == room_id]
 
-            if not room_df.empty:
-                # Dual Axis Chart
-                st.altair_chart(make_dual_axis_chart(room_df), use_container_width=True)
+            if room_data_list:
+                # Split Charts - Plotly, static
+                # staticPlot: True disables all interactions (zoom, pan, hover)
+                st.plotly_chart(make_split_charts(room_data_list), use_container_width=True, config={'staticPlot': True})
 
         else:
             st.warning("Connecting...")
