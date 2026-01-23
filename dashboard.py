@@ -64,6 +64,7 @@ else:
 
 if 'history' not in st.session_state: st.session_state.history = []
 if 'latest' not in st.session_state: st.session_state.latest = {}
+if 'page' not in st.session_state: st.session_state.page = 'dashboard'
 
 # 3. Memory Protection (Capping the data)
 while not data_queue.empty():
@@ -125,7 +126,7 @@ def make_split_charts(data):
     fig = make_subplots(
         rows=2, cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.15
+        vertical_spacing=0.20
     )
 
     # Temperature Trend (Top)
@@ -133,8 +134,8 @@ def make_split_charts(data):
         go.Scatter(
             x=times, y=temps,
             mode="lines+markers",
-            line=dict(color="orange", width=3),
-            marker=dict(size=6),
+            line=dict(color="orange", width=5),
+            marker=dict(size=8),
             name="Temperature Trend"
         ),
         row=1, col=1
@@ -145,8 +146,8 @@ def make_split_charts(data):
         go.Scatter(
             x=times, y=hums,
             mode="lines+markers",
-            line=dict(color="blue", width=3),
-            marker=dict(size=6),
+            line=dict(color="blue", width=5),
+            marker=dict(size=8),
             name="Humidity Trend"
         ),
         row=2, col=1
@@ -154,7 +155,7 @@ def make_split_charts(data):
 
     # Minimal layout (safe for older Plotly)
     fig.update_layout(
-        height=700,
+        height=900,
         showlegend=False
     )
 
@@ -180,43 +181,92 @@ def make_split_charts(data):
 
 
 # Main Display Loop
-cols = st.columns(3)
+if st.session_state.page == 'dashboard':
+    cols = st.columns(3)
 
-# We want exactly Room 1, Room 2, Room 3 in order
-# Room 1 has a special title
-ordered_rooms = [("Bilddynamik Room 01.103", "room-1"), ("Room 2", "room-2"), ("Room 3", "room-3")]
+    # We want exactly Room 1, Room 2, Room 3 in order
+    # Room 1 has a special title
+    ordered_rooms = [("Bilddynamik Room 01.103", "room-1"), ("Lab 2", "room-2"), ("Lab 3", "room-3")]
 
-for i, (room_display_name, room_id) in enumerate(ordered_rooms):
-    with cols[i]:
-        st.markdown(f"## {room_display_name}")
+    for i, (room_display_name, room_id) in enumerate(ordered_rooms):
+        with cols[i]:
+            st.markdown(f"## {room_display_name}")
 
-        room_data = st.session_state.latest.get(room_id)
+            room_data = st.session_state.latest.get(room_id)
 
-        if room_data:
-            temp = room_data['temperature']
-            hum = room_data['humidity']
+            if room_data:
+                temp = room_data['temperature']
+                hum = room_data['humidity']
 
-            # Big Numbers using User's HTML (2 decimal places)
-            st.markdown(
-                f"""
-                <div style="font-size:40px;">
-                    🌡️ {temp:.2f} °C <br>
-                    💧 {hum:.2f} %
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+                # Big Numbers using User's HTML (2 decimal places)
+                st.markdown(
+                    f"""
+                    <div style="font-size: 55px;">
+                        🌡️ {temp:.2f} °C <br>
+                        💧 {hum:.2f} %
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
 
-            # Filter history for this room (list comprehension instead of pandas)
-            room_data_list = [d for d in history_data if d['Room'] == room_id]
+                # Filter history for this room (list comprehension instead of pandas)
+                room_data_list = [d for d in history_data if d['Room'] == room_id]
 
-            if room_data_list:
-                # Split Charts - Plotly, static
-                # staticPlot: True disables all interactions (zoom, pan, hover)
-                st.plotly_chart(make_split_charts(room_data_list), use_container_width=True, config={'staticPlot': True})
+                if room_data_list:
+                    # Split Charts - Plotly, static
+                    # staticPlot: True disables all interactions (zoom, pan, hover)
+                    st.plotly_chart(make_split_charts(room_data_list), use_container_width=True, config={'staticPlot': True})
 
-        else:
-            st.warning("Connecting...")
+            else:
+                st.warning("Connecting...")
+
+elif st.session_state.page == 'info':
+    # Info Screen
+    st.markdown(
+        """
+        <style>
+        .info-container {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 80vh;
+            text-align: center;
+            font-family: 'Arial', sans-serif;
+        }
+        .info-text {
+            margin-bottom: 20px;
+        }
+        .speaker {
+            font-size: 40px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .title {
+            font-size: 32px;
+            font-style: italic;
+            color: #34495e;
+            margin: 30px 0;
+        }
+        .location {
+            font-size: 28px;
+            color: #7f8c8d;
+        }
+        </style>
+        <div class="info-container">
+            <div class="info-text speaker">Sprecher/Speaker: Prof. Dr. Francesco Piazza, Universität Augsburg</div>
+            <div class="info-text title">Titel/Title: Non-equilibrium as a resource: Non-thermal steady-states of cavity-quantum-materials</div>
+            <div class="info-text location">Ort/Location: Hörsaal A (Biologie)/lecture hall A (Biology)</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+# Toggle page logic for next run
+if st.session_state.page == 'dashboard':
+    st.session_state.page = 'info'
+else:
+    st.session_state.page = 'dashboard'
 
 time.sleep(5)  # Refresh rate
 st.rerun()
