@@ -230,32 +230,32 @@ elif st.session_state.page == 'info':
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            height: 80vh;
+            height: 120vh;
             text-align: center;
-            font-family: 'Arial', sans-serif;
+            font-family: 'Inter', sans-serif;
         }
         .info-text {
             margin-bottom: 20px;
         }
         .speaker {
-            font-size: 40px;
+            font-size: 85px;
             font-weight: bold;
-            color: #2c3e50;
+            color: #00D1FF;
         }
         .title {
-            font-size: 32px;
+            font-size: 65px;
             font-style: italic;
-            color: #34495e;
-            margin: 30px 0;
+            color: #4DA8FF;
+            margin: 55px;
         }
         .location {
-            font-size: 28px;
-            color: #7f8c8d;
+            font-size: 50px;
+            color: #FFD166;
         }
         </style>
         <div class="info-container">
-            <div class="info-text speaker">Sprecher/Speaker: Prof. Dr. Francesco Piazza, Universität Augsburg</div>
-            <div class="info-text title">Titel/Title: Non-equilibrium as a resource: Non-thermal steady-states of cavity-quantum-materials</div>
+            <div class="info-text speaker">Sprecher/Speaker: Prof. Dr. Christophe Szwaj, Université de Lille</div>
+            <div class="info-text title">Titel/Title: Shot Electro-Optic Detection of THz Pulses</div>
             <div class="info-text location">Ort/Location: Hörsaal A (Biologie)/lecture hall A (Biology)</div>
         </div>
         """,
@@ -268,5 +268,5 @@ if st.session_state.page == 'dashboard':
 else:
     st.session_state.page = 'dashboard'
 
-time.sleep(5)  # Refresh rate
+time.sleep(10)  # Refresh rate
 st.rerun()
