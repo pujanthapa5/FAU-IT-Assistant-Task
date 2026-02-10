@@ -155,25 +155,25 @@ def make_split_charts(data):
 
     # Minimal layout (safe for older Plotly)
     fig.update_layout(
-        height=900,
+        height=1000,
         showlegend=False
     )
 
     # Titles for each subplot (safe method)
     fig['layout']['annotations'] = [
         dict(
-            x=0.5, y=1.05,
+            x=0.1, y=1.05,
             xref='paper', yref='paper',
             text='Temperature Trend',
             showarrow=False,
-            font=dict(size=20)
+            font=dict(size=30)
         ),
         dict(
-            x=0.5, y=0.45,
+            x=0.1, y=0.45,
             xref='paper', yref='paper',
             text='Humidity Trend',
             showarrow=False,
-            font=dict(size=20)
+            font=dict(size=30)
         )
     ]
 
@@ -201,7 +201,7 @@ if st.session_state.page == 'dashboard':
                 # Big Numbers using User's HTML (2 decimal places)
                 st.markdown(
                     f"""
-                    <div style="font-size: 55px;">
+                    <div style="font-size: 65px;">
                         🌡️ {temp:.2f} °C <br>
                         💧 {hum:.2f} %
                     </div>
