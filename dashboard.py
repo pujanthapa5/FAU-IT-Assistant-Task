@@ -184,7 +184,7 @@ def make_split_charts(data, show_header=False):
         go.Scatter(
             x=times, y=hums,
             mode="lines+markers",
-            line=dict(color="blue", width=2),
+            line=dict(color="lightblue", width=2),
             marker=dict(size=6),
             name="Humidity Trend",
             cliponaxis=False
@@ -192,7 +192,7 @@ def make_split_charts(data, show_header=False):
         row=2, col=1
     )
 
-    tick_font_x = dict(size=14, color="lightgray") # reduced size for x-axis
+    tick_font_x = dict(size=18, color="lightgray") # increased size for x-axis
     tick_font_text = dict(size=20, color="lightgray") # kept size for other text if needed
 
     # X-Axis (Hourly with Exact 1H Gap)
@@ -225,8 +225,8 @@ def make_split_charts(data, show_header=False):
     fig.update_yaxes(
         visible=True,
         range=[20, 30],
-        dtick=1,
-        tickfont=dict(size=14, color="lightgray"),
+        dtick=2,
+        tickfont=dict(size=18, color="lightgray"),
         gridcolor="rgba(255,255,255,0.1)",
         title=dict(text="Temp (°C)", font=dict(size=16, color="white")),
         row=1, col=1
@@ -235,7 +235,7 @@ def make_split_charts(data, show_header=False):
         visible=True,
         range=[25, 45],
         dtick=5,
-        tickfont=dict(size=14, color="lightgray"),
+        tickfont=dict(size=18, color="lightgray"),
         gridcolor="rgba(255,255,255,0.1)",
         title=dict(text="Hum (%)", font=dict(size=16, color="white")),
         row=2, col=1
