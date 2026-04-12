@@ -1,389 +1,276 @@
-# dashboard.py
-import logging
-import queue
-import textwrap
-import time
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
-
-import plotly.graph_objects as go
 import streamlit as st
-from plotly.subplots import make_subplots
-
-import config
-from event_scraper import Event, EventScraper
+import time
+from datetime import datetime, timedelta
+import queue
+import logging
 from receiver import PusherSensorReceiver
+import config
+from event_scraper import EventScraper
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import textwrap
 
-# ── Page config (must be first Streamlit call) ────────────────────────────────
-st.set_page_config(page_title="Sensor Dashboard", page_icon="🌡️", layout="wide")
-st.markdown(
-    """
-    <style>
-        #MainMenu {visibility: hidden;}
-        footer     {visibility: hidden;}
-        header     {visibility: hidden;}
-        div.block-container {padding-top: 1rem;}
-    </style>
-    """,
-    unsafe_allow_html=True,
+# Configure page
+st.set_page_config(
+    page_title="Sensor Dashboard",
+    page_icon="🌡️",
+    layout="wide"
 )
 
-TEMP_RANGE = (18, 30)
-HUM_RANGE = (30, 60)
-MAX_HISTORY = 10_000
-REFRESH_INTERVAL_S = 20
-EVENT_CACHE_TTL_S = 86_400  # 24 h
-SCREENSHOT_TIMEOUT_S = 300   # 5 min
+st.markdown("""
+    <style>
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        div.block-container {padding-top: 1rem;} 
+    </style>
+""", unsafe_allow_html=True)
+
+if 'data_queue' not in st.session_state:
+    st.session_state.data_queue = queue.Queue()
+
+data_queue = st.session_state.data_queue
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Data models
-# ══════════════════════════════════════════════════════════════════════════════
-
-@dataclass
-class SensorReading:
-    room: str
-    temperature: float
-    humidity: float
-    timestamp: datetime
+def on_message_received(data):
+    try:
+        data['timestamp'] = datetime.now()
+        data_queue.put(data)
+    except Exception:
+        pass
 
 
-@dataclass
-class ScreenshotState:
-    active: bool = False
-    url: str = ""
-    window_title: str = ""
-    timestamp: Optional[datetime] = None
-    last_signal: float = 0.0
+if 'receiver' not in st.session_state:
+    receiver = PusherSensorReceiver(
+        api_key=config.PUSHER_KEY,
+        cluster=config.PUSHER_CLUSTER,
+        log_level=logging.INFO
+    )
+    channels = [f'room-{i}' for i in range(1, 4)] + ['screenshot-stream']
+    receiver.connect(channels, on_message_received)
+    st.session_state.receiver = receiver
+else:
+    receiver = st.session_state.receiver
+
+if 'history' not in st.session_state: st.session_state.history = []
+if 'latest' not in st.session_state: st.session_state.latest = {}
+if 'page' not in st.session_state: st.session_state.page = 'dashboard'
+if 'screenshot_active' not in st.session_state: st.session_state.screenshot_active = False
+if 'last_screenshot_signal' not in st.session_state: st.session_state.last_screenshot_signal = 0
+
+if 'events' not in st.session_state: st.session_state.events = []
+if 'event_index' not in st.session_state: st.session_state.event_index = 0
+if 'last_fetched' not in st.session_state: st.session_state.last_fetched = 0
+
+REFRESH_INTERVAL = 86400  # Re-check website every 24 hours (1 day)
+
+now_ts = time.time()
+if now_ts - st.session_state.last_fetched > REFRESH_INTERVAL or not st.session_state.events:
+    fetched = EventScraper().fetch_upcoming(n=1)
+    if fetched:
+        st.session_state.events = fetched
+        st.session_state.last_fetched = now_ts
+
+# Memory Protection (Capping the data)
+while not data_queue.empty():
+    item = data_queue.get()
+    room = item.get('room')
+    if room:
+        st.session_state.latest[room] = item
+        st.session_state.history.append({
+            "Time": item['timestamp'],
+            "Room": room,
+            "Temp": item['temperature'],
+            "Hum": item['humidity']
+        })
+
+    if len(st.session_state.history) > 10000:
+        st.session_state.history = st.session_state.history[-10000:]
+
+    if item.get('type') == 'screenshot':
+        st.session_state.latest_screenshot = item.get('url')
+        st.session_state.latest_screenshot_timestamp = item.get('timestamp')
+        st.session_state.latest_screenshot_data = item
+        st.session_state.screenshot_active = True
+        st.session_state.last_screenshot_signal = time.time()
+    
+    if item.get('type') == 'screenshot_status':
+        st.session_state.screenshot_active = item.get('active', False)
+        st.session_state.last_screenshot_signal = time.time()
+
+if st.session_state.screenshot_active:
+    if time.time() - st.session_state.last_screenshot_signal > 300:
+        st.session_state.screenshot_active = False
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# State manager (single source of truth for st.session_state)
-# ══════════════════════════════════════════════════════════════════════════════
-
-class DashboardState:
-    """
-    Thin wrapper around st.session_state that centralises all read/write access.
-    Keeps business logic out of the rendering layer.
-    """
-
-    # ------------------------------------------------------------------ init
-    def _ensure(self, key: str, default):
-        if key not in st.session_state:
-            st.session_state[key] = default
-
-    def initialise(self) -> None:
-        self._ensure("data_queue", queue.Queue())
-        self._ensure("history", [])
-        self._ensure("latest", {})
-        self._ensure("page", "dashboard")
-        self._ensure("screenshot", ScreenshotState())
-        self._ensure("events", [])
-        self._ensure("event_index", 0)
-        self._ensure("last_fetched", 0.0)
-
-    # ---------------------------------------------------------------- getters
-    @property
-    def data_queue(self) -> queue.Queue:
-        return st.session_state.data_queue
-
-    @property
-    def history(self) -> List[dict]:
-        return st.session_state.history
-
-    @property
-    def latest(self) -> Dict[str, dict]:
-        return st.session_state.latest
-
-    @property
-    def page(self) -> str:
-        return st.session_state.page
-
-    @page.setter
-    def page(self, value: str) -> None:
-        st.session_state.page = value
-
-    @property
-    def screenshot(self) -> ScreenshotState:
-        return st.session_state.screenshot
-
-    @property
-    def events(self) -> List[Event]:
-        return st.session_state.events
-
-    @property
-    def event_index(self) -> int:
-        return st.session_state.event_index
-
-    # --------------------------------------------------------------- mutators
-    def push_message(self, data: dict) -> None:
-        data["timestamp"] = datetime.now()
-        self.data_queue.put(data)
-
-    def drain_queue(self) -> None:
-        while not self.data_queue.empty():
-            item = self.data_queue.get()
-            self._process_item(item)
-        if len(self.history) > MAX_HISTORY:
-            st.session_state.history = self.history[-MAX_HISTORY:]
-
-    def _process_item(self, item: dict) -> None:
-        room = item.get("room")
-        if room:
-            self.latest[room] = item
-            self.history.append(
-                {
-                    "Time": item["timestamp"],
-                    "Room": room,
-                    "Temp": item["temperature"],
-                    "Hum": item["humidity"],
-                }
-            )
-
-        msg_type = item.get("type")
-        if msg_type == "screenshot":
-            ss = self.screenshot
-            ss.active = True
-            ss.url = item.get("url", "")
-            ss.window_title = item.get("window_title", "Unknown")
-            ss.timestamp = item.get("timestamp")
-            ss.last_signal = time.time()
-
-        elif msg_type == "screenshot_status":
-            ss = self.screenshot
-            ss.active = item.get("active", False)
-            ss.last_signal = time.time()
-
-    def maybe_expire_screenshot(self) -> None:
-        ss = self.screenshot
-        if ss.active and time.time() - ss.last_signal > SCREENSHOT_TIMEOUT_S:
-            ss.active = False
-
-    def maybe_refresh_events(self) -> None:
-        now = time.time()
-        if now - st.session_state.last_fetched > EVENT_CACHE_TTL_S or not self.events:
-            fetched = EventScraper().fetch_upcoming(n=1)
-            if fetched:
-                st.session_state.events = fetched
-                st.session_state.last_fetched = now
-
-    def advance_event_index(self) -> None:
-        st.session_state.event_index += 1
-
-    def toggle_page(self) -> None:
-        if self.page == "dashboard":
-            if self.events:
-                self.page = "info"
-            else:
-                self.page = "website"
-        elif self.page == "info":
-            self.page = "website"
-        else:
-            self.page = "dashboard"
-
-    def history_for_room(self, room_id: str) -> List[dict]:
-        return [d for d in self.history if d["Room"] == room_id]
+history_data = st.session_state.history
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Chart builder
-# ══════════════════════════════════════════════════════════════════════════════
+def make_split_charts(data, show_header=False):
+    from collections import OrderedDict
+    
+    hourly_data = OrderedDict()
+    for d in data:
+        hour_key = d['Time'].replace(minute=0, second=0, microsecond=0)
+        hourly_data[hour_key] = d
+        
+    sorted_hours = sorted(hourly_data.keys())
+    times = sorted_hours
+    temps = [hourly_data[h]['Temp'] for h in sorted_hours]
+    hums = [hourly_data[h]['Hum'] for h in sorted_hours]
 
-class SensorChartBuilder:
-    """Creates the dual-subplot temperature/humidity chart for one room."""
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.15
+    )
 
-    _TICK_FONT_AXIS = dict(size=18, color="lightgray")
+    fig.add_trace(
+        go.Scatter(
+            x=times, y=temps,
+            mode="lines+markers",
+            line=dict(color="orange", width=2),
+            marker=dict(size=6),
+            name="Temperature Trend",
+            cliponaxis=False
+        ),
+        row=1, col=1
+    )
 
-    def build(self, data: List[dict], show_header: bool = False) -> go.Figure:
-        times, temps, hums = self._aggregate_hourly(data)
+    fig.add_trace(
+        go.Scatter(
+            x=times, y=hums,
+            mode="lines+markers",
+            line=dict(color="lightblue", width=2),
+            marker=dict(size=6),
+            name="Humidity Trend",
+            cliponaxis=False
+        ),
+        row=2, col=1
+    )
 
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.15)
-        fig.add_trace(
-            go.Scatter(
-                x=times, y=temps, mode="lines+markers",
-                line=dict(color="orange", width=2), marker=dict(size=6),
-                name="Temperature", cliponaxis=False,
-            ),
-            row=1, col=1,
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=times, y=hums, mode="lines+markers",
-                line=dict(color="lightblue", width=2), marker=dict(size=6),
-                name="Humidity", cliponaxis=False,
-            ),
-            row=2, col=1,
-        )
+    tick_font_x = dict(size=18, color="lightgray")
 
-        start, end = self._x_window()
-        x_axis_cfg = dict(
-            range=[start, end], dtick=3_600_000, tickformat="%H:%M",
-            tickangle=-45, tickfont=self._TICK_FONT_AXIS,
-            gridcolor="rgba(255,255,255,0.1)",
-        )
-        fig.update_xaxes(**x_axis_cfg, row=1, col=1)
-        fig.update_xaxes(**x_axis_cfg, row=2, col=1)
-        fig.update_yaxes(
-            range=[20, 30], dtick=2,
-            tickfont=dict(size=18, color="lightgray"),
-            gridcolor="rgba(255,255,255,0.1)",
-            title=dict(text="Temp (°C)", font=dict(size=16, color="white")),
-            row=1, col=1,
-        )
-        fig.update_yaxes(
-            range=[25, 45], dtick=5,
-            tickfont=dict(size=18, color="lightgray"),
-            gridcolor="rgba(255,255,255,0.1)",
-            title=dict(text="Hum (%)", font=dict(size=16, color="white")),
-            row=2, col=1,
-        )
+    now = datetime.now()
+    end_time = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    start_time = end_time - timedelta(hours=12)
+
+    fig.update_xaxes(
+        range=[start_time, end_time], dtick=3600000, tickformat="%H:%M",
+        tickangle=-45, tickfont=tick_font_x, gridcolor="rgba(255,255,255,0.1)",
+        row=1, col=1
+    )
+    
+    fig.update_xaxes(
+        range=[start_time, end_time], dtick=3600000, tickformat="%H:%M",
+        tickangle=-45, tickfont=tick_font_x, gridcolor="rgba(255,255,255,0.1)",
+        row=2, col=1
+    )
+
+    fig.update_yaxes(
+        visible=True, range=[20, 30], dtick=2,
+        tickfont=dict(size=18, color="lightgray"), gridcolor="rgba(255,255,255,0.1)",
+        title=dict(text="Temp (°C)", font=dict(size=16, color="white")),
+        row=1, col=1
+    )
+    fig.update_yaxes(
+        visible=True, range=[25, 45], dtick=5,
+        tickfont=dict(size=18, color="lightgray"), gridcolor="rgba(255,255,255,0.1)",
+        title=dict(text="Hum (%)", font=dict(size=16, color="white")),
+        row=2, col=1
+    )
+
+    fig.update_layout(
+        height=1000, showlegend=False,
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(t=120, b=80, l=30, r=40)
+    )
+
+    if show_header:
         fig.update_layout(
-            height=1000, showlegend=False,
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            margin=dict(t=120, b=80, l=30, r=40),
+            annotations=[
+                dict(x=0.5, y=1.05, xref='paper', yref='paper', text='Temperature Trend', showarrow=False, font=dict(size=35, color="white"), xanchor='center'),
+                dict(x=0.5, y=0.45, xref='paper', yref='paper', text='Humidity Trend', showarrow=False, font=dict(size=35, color="white"), xanchor='center')
+            ]
         )
 
-        if show_header:
-            fig.update_layout(
-                annotations=[
-                    dict(x=0.5, y=1.05, xref="paper", yref="paper",
-                         text="Temperature Trend", showarrow=False,
-                         font=dict(size=35, color="white"), xanchor="center"),
-                    dict(x=0.5, y=0.45, xref="paper", yref="paper",
-                         text="Humidity Trend", showarrow=False,
-                         font=dict(size=35, color="white"), xanchor="center"),
-                ]
-            )
+    return fig
 
-        return fig
+sleep_time = 20
 
-    # --------------------------------------------------------------- helpers
-    @staticmethod
-    def _aggregate_hourly(data: List[dict]):
-        from collections import OrderedDict
-        hourly: dict = OrderedDict()
-        for d in data:
-            key = d["Time"].replace(minute=0, second=0, microsecond=0)
-            hourly[key] = d
-        sorted_keys = sorted(hourly)
-        return (
-            sorted_keys,
-            [hourly[h]["Temp"] for h in sorted_keys],
-            [hourly[h]["Hum"] for h in sorted_keys],
-        )
+# Main Display Loop
+if st.session_state.page == 'dashboard':
+    st.markdown("<h1 style='text-align:center;'>🌡️ Lab Environment Monitor</h1>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align:center;'>Last Update: {datetime.now().strftime('%H:%M:%S')}</p>", unsafe_allow_html=True)
+    st.markdown("---")
 
-    @staticmethod
-    def _x_window():
-        now = datetime.now()
-        end = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-        return end - timedelta(hours=12), end
+    cols = st.columns(3)
+    ordered_rooms = [("Bilddynamik Room 01.103", "room-1"), ("Lab 2", "room-2"), ("Lab 3", "room-3")]
 
+    for i, (room_display_name, room_id) in enumerate(ordered_rooms):
+        with cols[i]:
+            st.markdown(f"## {room_display_name}")
+            room_data = st.session_state.latest.get(room_id)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Page renderers
-# ══════════════════════════════════════════════════════════════════════════════
+            if room_data:
+                temp = room_data['temperature']
+                hum = room_data['humidity']
 
-ROOMS = [
-    ("Bilddynamik Room 01.103", "room-1"),
-    ("Lab 2",                   "room-2"),
-    ("Lab 3",                   "room-3"),
-]
+                st.markdown(
+                    f"""<div style="font-size: 65px;">🌡️ {temp:.2f} °C <br>💧 {hum:.2f} %</div>""",
+                    unsafe_allow_html=True
+                )
 
+                room_data_list = [d for d in history_data if d['Room'] == room_id]
 
-class DashboardPage:
-    """Renders the live sensor data page."""
+                if room_data_list:
+                    show_header = (room_id == "room-2")
+                    st.plotly_chart(make_split_charts(room_data_list, show_header=show_header), width='stretch', config={'staticPlot': True})
 
-    def __init__(self, state: DashboardState) -> None:
-        self._state = state
-        self._chart = SensorChartBuilder()
+                if (room_id == "room-1" and 
+                    st.session_state.screenshot_active and 
+                    'latest_screenshot' in st.session_state and 
+                    st.session_state.latest_screenshot):
+                    
+                    st.markdown("---")
+                    st.markdown("### 📸 Live View")
+                    screenshot_data = st.session_state.latest_screenshot_data
+                    image_url = st.session_state.latest_screenshot
+                    st.image(
+                        image_url, 
+                        caption=f"Captured: {screenshot_data.get('window_title', 'Unknown')} at {st.session_state.latest_screenshot_timestamp}",
+                        use_container_width=True
+                    )
+            else:
+                st.warning("Connecting...")
 
-    def render(self) -> None:
-        st.markdown(
-            "<h1 style='text-align:center;'>🌡️ Lab Environment Monitor</h1>",
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            f"<p style='text-align:center;'>Last Update: {datetime.now():%H:%M:%S}</p>",
-            unsafe_allow_html=True,
-        )
-        st.markdown("---")
+    # Cycle to next logic
+    if st.session_state.events:
+        st.session_state.page = 'info'
+    else:
+        st.session_state.page = 'website'
 
-        cols = st.columns(3)
-        for i, (display_name, room_id) in enumerate(ROOMS):
-            with cols[i]:
-                self._render_room(display_name, room_id)
-
-    # --------------------------------------------------------------- helpers
-    def _render_room(self, name: str, room_id: str) -> None:
-        st.markdown(f"## {name}")
-        data = self._state.latest.get(room_id)
-        if not data:
-            st.warning("Connecting…")
-            return
-
-        temp, hum = data["temperature"], data["humidity"]
-        st.markdown(
-            f'<div style="font-size:65px;">🌡️ {temp:.2f} °C<br>💧 {hum:.2f} %</div>',
-            unsafe_allow_html=True,
-        )
-
-        room_hist = self._state.history_for_room(room_id)
-        if room_hist:
-            st.plotly_chart(
-                self._chart.build(room_hist, show_header=(room_id == "room-2")),
-                width="stretch",
-                config={"staticPlot": True},
-            )
-
-        if room_id == "room-1":
-            self._render_screenshot_if_active()
-
-    def _render_screenshot_if_active(self) -> None:
-        ss = self._state.screenshot
-        if not (ss.active and ss.url):
-            return
-        st.markdown("---")
-        st.markdown("### 📸 Live View")
-        st.image(
-            ss.url,
-            caption=f"Captured: {ss.window_title} at {ss.timestamp}",
-            use_container_width=True,
-        )
-
-
-class InfoPage:
-    """Renders the upcoming events page."""
-
-    def __init__(self, state: DashboardState) -> None:
-        self._state = state
-
-    def render(self) -> None:
-        events = self._state.events
-        if not events:
-            self._state.page = "dashboard"
-            st.rerun()
-            return
-
-        ev = events[self._state.event_index % len(events)]
-        self._state.advance_event_index()
-
+elif st.session_state.page == 'info':
+    events = st.session_state.events
+    if events:
+        idx = st.session_state.event_index % len(events)
+        ev = events[idx]
+        
         st.markdown(
             textwrap.dedent(f"""
                 <style>
-                .info-container {{ display:flex; flex-direction:column; justify-content:center;
-                    align-items:center; min-height:90vh; text-align:center;
-                    font-family:'Inter',sans-serif; padding:5vmin;
-                    background:radial-gradient(circle at center,#1a1a2e 0%,#0f0f1a 100%);
-                    border-radius:20px; margin-top:20px; }}
-                .header-title {{ font-size:8vmin; font-weight:bold; color:#ffffff;
-                    margin-bottom:5vmin; border-bottom:2px solid #4DA8FF; padding-bottom:2vmin; width:100%; }}
-                .event-date  {{ font-size:5vmin; font-weight:bold; color:#FF6B6B; }}
-                .event-time  {{ font-size:4vmin; color:#AAD4FF; margin-bottom:4vmin; }}
-                .speaker     {{ font-size:8vmin; font-weight:bold; color:#00D1FF; line-height:1.1; }}
-                .title       {{ font-size:6vmin; font-style:italic; color:#4DA8FF;
-                    margin:6vmin 0; line-height:1.2; text-wrap:balance; }}
-                .location    {{ font-size:5vmin; color:#FFD166; }}
+                .info-container {{
+                    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 9999;
+                    display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; box-sizing: border-box;
+                    font-family: 'Inter', sans-serif; padding: 5vmin;
+                    background: radial-gradient(circle at center, #1a1a2e 0%, #0f0f1a 100%);
+                }}
+                .header-title {{ font-size: 10vmin; font-weight: bold; color: #ffffff; margin-bottom: 5vmin; border-bottom: 2px solid #4DA8FF; padding-bottom: 2vmin; width: 100%; }}
+                .event-date {{ font-size: 8vmin; font-weight: bold; color: #FF6B6B; }}
+                .event-time {{ font-size: 7vmin; color: #AAD4FF; margin-bottom: 4vmin; }}
+                .speaker    {{ font-size: 10vmin; font-weight: bold; color: #00D1FF; line-height: 1.1; }}
+                .title      {{ font-size: 7vmin; font-style: italic; color: #4DA8FF; margin: 6vmin 0; line-height: 1.2; text-wrap: balance; }}
+                .location   {{ font-size: 7vmin; color: #FFD166; }}
                 </style>
                 <div class="info-container">
                     <div class="header-title">📅 UPCOMING EVENTS</div>
@@ -394,73 +281,19 @@ class InfoPage:
                     <div class="location">📍 {ev.location}</div>
                 </div>
             """),
-            unsafe_allow_html=True,
+            unsafe_allow_html=True
         )
+        st.session_state.event_index += 1
 
+    st.session_state.page = 'website'
 
-class WebsitePage:
-    """Renders a fullscreen website via iframe."""
+elif st.session_state.page == 'website':
+    st.markdown(
+        '<iframe src="https://www.fkp.physik.nat.fau.eu/" sandbox="allow-same-origin" style="position:fixed; top:0; left:0; bottom:0; right:0; width:100%; height:100%; border:none; margin:0; padding:0; overflow:hidden; z-index:999999;"></iframe>',
+        unsafe_allow_html=True
+    )
+    sleep_time = 10
+    st.session_state.page = 'dashboard'
 
-    def __init__(self, state: DashboardState) -> None:
-        self._state = state
-
-    def render(self) -> None:
-        st.markdown(
-            '<iframe src="https://www.fkp.physik.nat.fau.eu/" style="position:fixed; top:0; left:0; bottom:0; right:0; width:100%; height:100%; border:none; margin:0; padding:0; overflow:hidden; z-index:999999;"></iframe>',
-            unsafe_allow_html=True,
-        )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# App bootstrap
-# ══════════════════════════════════════════════════════════════════════════════
-
-class SensorDashboardApp:
-    """
-    Top-level application class.  Wires together the receiver, state manager,
-    and page renderers, then drives the Streamlit run-loop.
-    """
-
-    def __init__(self) -> None:
-        self._state = DashboardState()
-        self._state.initialise()
-        self._ensure_receiver()
-
-    # ----------------------------------------------------------------- public
-    def run(self) -> None:
-        self._state.drain_queue()
-        self._state.maybe_expire_screenshot()
-        self._state.maybe_refresh_events()
-
-        current_page = self._state.page
-
-        if current_page == "dashboard":
-            DashboardPage(self._state).render()
-        elif current_page == "info":
-            InfoPage(self._state).render()
-        elif current_page == "website":
-            WebsitePage(self._state).render()
-
-        self._state.toggle_page()
-        
-        if current_page == "website":
-            time.sleep(10)
-        else:
-            time.sleep(REFRESH_INTERVAL_S)
-        st.rerun()
-
-    # --------------------------------------------------------------- internal
-    def _ensure_receiver(self) -> None:
-        if "receiver" not in st.session_state:
-            receiver = PusherSensorReceiver(
-                api_key=config.PUSHER_KEY,
-                cluster=config.PUSHER_CLUSTER,
-                log_level=logging.INFO,
-            )
-            channels = [f"room-{i}" for i in range(1, 4)] + ["screenshot-stream"]
-            receiver.connect(channels, self._state.push_message)
-            st.session_state.receiver = receiver
-
-
-# ── Entry point ───────────────────────────────────────────────────────────────
-SensorDashboardApp().run()
+time.sleep(sleep_time)
+st.rerun()

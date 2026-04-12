@@ -1,35 +1,48 @@
-# Sensor & Event Dashboard
+# Lab Environment Monitor Dashboard
 
-This project is a Python-based lab monitor dashboard that displays real-time laboratory environment metrics (temperature and humidity), streams screenshots, and scrapes and displays upcoming physics colloquium events.
+A Python-based Streamlit dashboard that provides real-time monitoring of laboratory environment metrics (temperature and humidity). The system integrates with live sensor feeds, dynamic web scrapers, and external display streams to automatically rotate through vital laboratory information, designed efficiently for large-screen formats.
 
-## Project Structure
+## Core Features
 
-- `dashboard.py`: The entry point of the Streamlit application. It handles routing and displaying the main dashboard (sensor readings and charts), event information (from the FAU physics website), and a fullscreen mode slide (visiting the physics website directly). The pages switch effectively in a continuous loop.
-- `config.py`: Configuration file holding secrets and API keys for Pusher (websocket service for real-time messaging) and Cloudflare R2 (S3-compatible object storage for uploading screenshots).
-- `event_scraper.py`: A web scraper built with `requests` and `BeautifulSoup`. It automatically fetches upcoming physics colloquium events from the FAU department website to be periodically shown on the Streamlit dashboard as an "Info" slide.
-- `receiver.py`: A WebSocket client built around `pysher` to receive real-time push events from Pusher channels. It listens to sensor readings for various rooms and screenshot notifications, passing received messages to the Streamlit application's state queue.
-- `sender_screenshot.py`: A utility script to capture screenshots from specific windows, fullscreen, or drawn regions. It captures the screen, uploads the temporary image to Cloudflare R2 to generate a public URL, and publishes the image URL back to the main dashboard through Pusher.
+1. **Live Sensor Dashboard**: Real-time graphing and visualization of laboratory environments (Temp & Humidity trends) managed through Pusher websockets.
+2. **Event Board**: Scrapes and prominently displays the latest upcoming Physics Colloquium events sourced directly from the FAU Physics Department.
+3. **Web Rotation**: Operates on an automatic timer to loop into full-screen interactive web views of internal department portals.
+4. **Screenshot Streaming**: Allows laboratory PCs to broadcast "Live View" active window / specified region screenshots directly onto the Streamlit UI dashboard seamlessly.
 
-## Requirements
+## File Architecture
 
-The project uses a mix of data and UI components. Ensure you have the required libraries installed:
+- `dashboard.py`: The primary Streamlit frontend application. Handles the looped routing between the sensor data visualizer, event views, and external iframes dynamically without caching bottlenecks.
+- `receiver.py`: A multithreaded listener utilizing `pysher` to ingest WebSocket real-time messages and funnel them into the dashboard's `queue.Queue`.
+- `event_scraper.py`: A `BeautifulSoup` integration that parses live academic colloquium directories to generate the event info slides automatically. 
+- `sender_screenshot.py`: A standalone utility that can be run on active laboratory workstations. It captures active screen sections, uploads them onto Cloudflare R2 bucket storage via `boto3`, and alerts the central dashboard.
+- `config.py`: Local configuration holding needed API keys.
 
+## Getting Started
+
+### 1. Install Dependencies
+
+Install all core web and processing packages:
 ```bash
-pip install streamlit plotly requests beautifulsoup4 pysher boto3 pyautogui pygetwindow
+pip install -r requirements.txt
 ```
 
-## Usage
+### 2. Configure Environment
 
-### 1. Running the Dashboard
-You can start the real-time visual dashboard by running:
+Ensure `config.py` is present in the root directory equipped with your required secrets:
+- Pusher App IDs, Cluster, & Secrets.
+- Cloudflare R2 Bucket configuration strings.
+
+### 3. Launch the Dashboard
+
+Run the main dashboard app in your environment:
 ```bash
 streamlit run dashboard.py
 ```
-This UI will rotate between showing live sensor charts, scraped physics events, and the fullscreen physics website.
+> Wait a few moments for the dashboard to automatically initialize websocket connections. It rotates slides indefinitely.
 
-### 2. Running the Screenshot Capture Tool
-To stream live visual captures to the dashboard, run the supplementary screenshot sender utility:
+### 4. (Optional) Run the Screenshot Tool
+To start casting visual captures of specific monitors or windows into the main dashboard:
 ```bash
 python sender_screenshot.py
 ```
-You will be prompted with an interactive menu to choose your screenshot source (e.g., Full Screen, Active Window, or Selected Region). This script will then capture, upload, and push those updates over the configured `config.py` endpoints for `dashboard.py` to pick up.
+You will be prompted to select Region or Window capture profiles via an interactive terminal/GUI mix.

@@ -1,0 +1,10 @@
+streamlit
+plotly
+requests
+beautifulsoup4
+pysher
+boto3
+pyautogui
+pygetwindow
+pusher
+Pillow
