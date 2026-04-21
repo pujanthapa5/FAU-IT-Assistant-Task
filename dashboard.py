@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import textwrap
 
+
 # Configure page
 st.set_page_config(
     page_title="Sensor Dashboard",
@@ -129,8 +130,8 @@ def make_split_charts(data, show_header=False):
         go.Scatter(
             x=times, y=temps,
             mode="lines+markers",
-            line=dict(color="orange", width=2),
-            marker=dict(size=6),
+            line=dict(color="orange", width=5),
+            marker=dict(size=12),
             name="Temperature Trend",
             cliponaxis=False
         ),
@@ -141,15 +142,15 @@ def make_split_charts(data, show_header=False):
         go.Scatter(
             x=times, y=hums,
             mode="lines+markers",
-            line=dict(color="lightblue", width=2),
-            marker=dict(size=6),
+            line=dict(color="lightblue", width=5),
+            marker=dict(size=12),
             name="Humidity Trend",
             cliponaxis=False
         ),
         row=2, col=1
     )
 
-    tick_font_x = dict(size=18, color="lightgray")
+    tick_font_x = dict(size=30, color="lightgray")
 
     now = datetime.now()
     end_time = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
@@ -169,28 +170,28 @@ def make_split_charts(data, show_header=False):
 
     fig.update_yaxes(
         visible=True, range=[20, 30], dtick=2,
-        tickfont=dict(size=18, color="lightgray"), gridcolor="rgba(255,255,255,0.1)",
-        title=dict(text="Temp (°C)", font=dict(size=16, color="white")),
+        tickfont=dict(size=30, color="lightgray"), gridcolor="rgba(255,255,255,0.1)",
+        title=dict(text="Temp (°C)", font=dict(size=28, color="white")),
         row=1, col=1
     )
     fig.update_yaxes(
         visible=True, range=[25, 45], dtick=5,
-        tickfont=dict(size=18, color="lightgray"), gridcolor="rgba(255,255,255,0.1)",
-        title=dict(text="Hum (%)", font=dict(size=16, color="white")),
+        tickfont=dict(size=30, color="lightgray"), gridcolor="rgba(255,255,255,0.1)",
+        title=dict(text="Hum (%)", font=dict(size=28, color="white")),
         row=2, col=1
     )
 
     fig.update_layout(
-        height=1000, showlegend=False,
+        height=1400, showlegend=False,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        margin=dict(t=120, b=80, l=30, r=40)
+        margin=dict(t=120, b=80, l=10, r=10)
     )
 
     if show_header:
         fig.update_layout(
             annotations=[
-                dict(x=0.5, y=1.05, xref='paper', yref='paper', text='Temperature Trend', showarrow=False, font=dict(size=35, color="white"), xanchor='center'),
-                dict(x=0.5, y=0.45, xref='paper', yref='paper', text='Humidity Trend', showarrow=False, font=dict(size=35, color="white"), xanchor='center')
+                dict(x=0.5, y=1.05, xref='paper', yref='paper', text='Temperature Trend', showarrow=False, font=dict(size=55, color="white"), xanchor='center'),
+                dict(x=0.5, y=0.45, xref='paper', yref='paper', text='Humidity Trend', showarrow=False, font=dict(size=55, color="white"), xanchor='center')
             ]
         )
 
@@ -200,8 +201,8 @@ sleep_time = 20
 
 # Main Display Loop
 if st.session_state.page == 'dashboard':
-    st.markdown("<h1 style='text-align:center;'>🌡️ Lab Environment Monitor</h1>", unsafe_allow_html=True)
-    st.markdown(f"<p style='text-align:center;'>Last Update: {datetime.now().strftime('%H:%M:%S')}</p>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align:center; font-size: 80px;'>🌡️ Lab Environment Monitor</h1>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align:center; font-size: 40px;'>Last Update: {datetime.now().strftime('%H:%M:%S')}</p>", unsafe_allow_html=True)
     st.markdown("---")
 
     cols = st.columns(3)
@@ -209,7 +210,7 @@ if st.session_state.page == 'dashboard':
 
     for i, (room_display_name, room_id) in enumerate(ordered_rooms):
         with cols[i]:
-            st.markdown(f"## {room_display_name}")
+            st.markdown(f"<h2 style='text-align:center; font-size: 60px;'>{room_display_name}</h2>", unsafe_allow_html=True)
             room_data = st.session_state.latest.get(room_id)
 
             if room_data:
@@ -217,7 +218,7 @@ if st.session_state.page == 'dashboard':
                 hum = room_data['humidity']
 
                 st.markdown(
-                    f"""<div style="font-size: 65px;">🌡️ {temp:.2f} °C <br>💧 {hum:.2f} %</div>""",
+                    f"""<div style="font-size: 90px; text-align:center;">🌡️ {temp:.2f} °C <br>💧 {hum:.2f} %</div>""",
                     unsafe_allow_html=True
                 )
 
@@ -225,7 +226,7 @@ if st.session_state.page == 'dashboard':
 
                 if room_data_list:
                     show_header = (room_id == "room-2")
-                    st.plotly_chart(make_split_charts(room_data_list, show_header=show_header), width='stretch', config={'staticPlot': True})
+                    st.plotly_chart(make_split_charts(room_data_list, show_header=show_header), use_container_width=True, config={'staticPlot': True})
 
                 if (room_id == "room-1" and 
                     st.session_state.screenshot_active and 
@@ -233,7 +234,7 @@ if st.session_state.page == 'dashboard':
                     st.session_state.latest_screenshot):
                     
                     st.markdown("---")
-                    st.markdown("### 📸 Live View")
+                    st.markdown("<h3 style='text-align:center; font-size: 45px;'>📸 Live View</h3>", unsafe_allow_html=True)
                     screenshot_data = st.session_state.latest_screenshot_data
                     image_url = st.session_state.latest_screenshot
                     st.image(
@@ -288,11 +289,79 @@ elif st.session_state.page == 'info':
     st.session_state.page = 'website'
 
 elif st.session_state.page == 'website':
-    st.markdown(
-        '<iframe src="https://www.fkp.physik.nat.fau.eu/" sandbox="allow-same-origin" style="position:fixed; top:0; left:0; bottom:0; right:0; width:100%; height:100%; border:none; margin:0; padding:0; overflow:hidden; z-index:999999;"></iframe>',
-        unsafe_allow_html=True
-    )
+    st.markdown("""
+<style>
+    /* This removes the default Streamlit padding so the iframe can go edge-to-edge */
+    .main .block-container {
+        padding-top: 0rem;
+        padding-bottom: 0rem;
+        padding-left: 0rem;
+        padding-right: 0rem;
+        max-width: 100%;
+    }
+</style>
+
+<div style="
+    width: 100vw; 
+    height: 80vh; 
+    overflow: hidden; 
+    position: relative;
+    background: #fff;
+">
+    <iframe 
+        src="https://www.fkp.physik.nat.fau.eu/"
+        sandbox="allow-same-origin"
+        style="
+            position: absolute;
+            top: -250px;   /* Adjust based on how much header you want to hide */
+            left: 0;
+            width: 100%;
+            height: calc(120vh + 250px); /* Offsets the top crop and pushes bottom out of view */
+            border: none;
+            zoom: 1.2;     /* Increases the size of the content for large monitors */
+            -moz-transform: scale(1.2); /* Firefox support */
+            -moz-transform-origin: 0 0;
+        "
+    ></iframe>
+</div>
+""", unsafe_allow_html=True)
+
     sleep_time = 10
+    st.session_state.page = 'custom_event'
+
+elif st.session_state.page == 'custom_event':
+    # ==== EDIT THESE ONLY ====
+    event_title = ""
+    event_place = ""
+    event_time = ""
+    event_image = ""  # URL or local path to your image
+    # =========================
+
+    if event_title and event_place and event_time:
+        image_html = f'<img src="{event_image}" style="max-height: 25vh; margin-top: 30px; border-radius: 10px; box-shadow: 0px 4px 15px rgba(0,0,0,0.5); object-fit: contain;">' if event_image else ""
+        
+        html_code = f"""
+<div style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 9999; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; background: radial-gradient(circle at center, #1a1a2e 0%, #0f0f1a 100%); color: white; padding: 50px; box-sizing: border-box; font-family: 'Inter', sans-serif;">
+    <h1 style="font-size: 8vmin; margin-bottom: 40px; color: #ffffff; border-bottom: 3px solid #4DA8FF; padding-bottom: 20px; width: 80%; line-height: 1.2;">
+        🎉 {event_title}
+    </h1>
+    <p style="font-size: 6vmin; margin: 20px; color: #4DA8FF; font-weight: 500;">
+        📍 {event_place}
+    </p>
+    <p style="font-size: 6vmin; margin: 20px; color: #FFD166; font-weight: 500;">
+        ⏰ {event_time}
+    </p>
+    <p style="font-size: 7vmin; margin-top: 60px; font-weight: bold; color: #00D1FF;">
+        🚀 See you there!
+    </p>
+    {image_html}
+</div>
+"""
+        st.markdown(html_code, unsafe_allow_html=True)
+        sleep_time = 10
+    else:
+        sleep_time = 0
+
     st.session_state.page = 'dashboard'
 
 time.sleep(sleep_time)
