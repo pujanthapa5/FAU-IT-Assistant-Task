@@ -289,42 +289,55 @@ elif st.session_state.page == 'info':
     st.session_state.page = 'website'
 
 elif st.session_state.page == 'website':
+    # 1. Remove Streamlit's default padding for a true "Full Screen" look
     st.markdown("""
-<style>
-    /* This removes the default Streamlit padding so the iframe can go edge-to-edge */
-    .main .block-container {
-        padding-top: 0rem;
-        padding-bottom: 0rem;
-        padding-left: 0rem;
-        padding-right: 0rem;
-        max-width: 100%;
-    }
-</style>
+        <style>
+            .main .block-container {
+                padding: 0rem !important;
+                max-width: 100% !important;
+            }
+            iframe {
+                border: none;
+            }
+        </style>
+    """, unsafe_allow_html=True)
 
-<div style="
-    width: 100vw; 
-    height: 80vh; 
-    overflow: hidden; 
-    position: relative;
-    background: #fff;
-">
-    <iframe 
-        src="https://www.fkp.physik.nat.fau.eu/"
-        sandbox="allow-same-origin"
-        style="
-            position: absolute;
-            top: -250px;   /* Adjust based on how much header you want to hide */
-            left: 0;
-            width: 100%;
-            height: calc(120vh + 250px); /* Offsets the top crop and pushes bottom out of view */
-            border: none;
-            zoom: 1.2;     /* Increases the size of the content for large monitors */
-            -moz-transform: scale(1.2); /* Firefox support */
-            -moz-transform-origin: 0 0;
-        "
-    ></iframe>
-</div>
-""", unsafe_allow_html=True)
+    # 2. Define the Embed Logic
+    # --- EDIT THESE VALUES TO ADJUST FOR 42" MONITOR AND HIDE COOKIE BANNER ---
+    zoom_level = 1.3      # Adjust to make text readable on large screen (1.5 to 2.5)
+    top_crop_vh = 25      # Cuts the top part (header). Increase if not enough.
+    
+    # ⚠️ CRITICAL: To hide the cookie banner, this number must be LARGE enough to push 
+    # the bottom of the website completely off the screen. 
+    # If you see the cookie banner, INCREASE this number (e.g., to 40 or 50)!
+    bottom_crop_vh = 40
+    # --------------------------------------------------------------------------
+
+    st.markdown(f"""
+        <div style="
+            width: 100vw; 
+            height: 100vh; 
+            overflow: hidden; 
+            position: relative;
+            background: #fff;
+        ">
+            <iframe 
+                src="https://www.fkp.physik.nat.fau.eu/"
+                scrolling="no"
+                sandbox="allow-same-origin" 
+                style="
+                    position: absolute;
+                    top: -{top_crop_vh}vh;
+                    left: 0;
+                    width: {100 / zoom_level}vw;
+                    height: {(100 + top_crop_vh + bottom_crop_vh) / zoom_level}vh;
+                    transform: scale({zoom_level});
+                    transform-origin: 0 0;
+                    border: none;
+                "
+            ></iframe>
+        </div>
+    """, unsafe_allow_html=True)
 
     sleep_time = 10
     st.session_state.page = 'custom_event'
