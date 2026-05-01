@@ -40,10 +40,10 @@ class EventScraper:
     }
     _DATE_FORMATS = ("%d.%m.%Y", "%B %d, %Y", "%b %d, %Y")
     _SPEAKER_PATTERNS = [
-        r"(?:von|by):\s*((?:Herrn|Frau|Prof\.?|Dr\.?)\s+[A-Z][a-z\w\.]+(?:\s+[A-Z][a-z\w\.]+)*)",
-        r"Speaker[:\s]+([A-Z][a-zA-Z\s\.\-]+)",
-        r"(Prof\.?\s*Dr\.?\s+[\w\s\.\-]+?)(?:\s*[û\-]|\s*,|\s*\n)",
-    ]
+    r"(?:von|by):\s*((?:Herrn|Frau|Prof\.?|Dr\.?)\s+[A-Z][\wäöüÄÖÜß\-\.]+(?:\s+[A-Z][\wäöüÄÖÜß\-\.]+)*)",
+    r"Speaker[:\s]+([A-Z][\wäöüÄÖÜß\s\.\-]+)",
+    r"(Prof\.?\s*Dr\.?\s+[A-Z][\wäöüÄÖÜß\.\-]+(?:\s+[A-Z][\wäöüÄÖÜß\.\-]+)*)(?:\s*[-–]|\s*,|\s*\n)",
+]
 
     # ----------------------------------------------------------------- public
     def fetch_upcoming(self, n: int = 1) -> List[Event]:
@@ -154,6 +154,8 @@ class EventScraper:
         raw = span.get_text(strip=True) if span else "N/A"
         raw = raw.replace("\n", " ").strip()
         parts = re.split(r"\s*[\-\–\—]\s*", raw)
+        if len(parts) > 2:
+            parts = [parts[0], '-'.join(parts[1:])]
         return parts[-1] if len(parts) > 1 else raw
 
     @staticmethod
@@ -192,6 +194,7 @@ class EventScraper:
             match = re.search(pattern, body_text, re.IGNORECASE)
             if match:
                 speaker = match.group(1).strip()
+                print(speaker)
                 speaker = re.sub(r"\bHerrn\b", "Herr", speaker, flags=re.IGNORECASE)
                 return speaker.replace("\n", " ").strip()
         return "N/A"
