@@ -153,7 +153,7 @@ class EventScraper:
         )
         raw = span.get_text(strip=True) if span else "N/A"
         raw = raw.replace("\n", " ").strip()
-        parts = re.split(r"\s*[\-\–\—]\s*", raw)
+        parts = re.split(r"\s*[\–\—]\s*", raw)
         if len(parts) > 2:
             parts = [parts[0], '-'.join(parts[1:])]
         return parts[-1] if len(parts) > 1 else raw
@@ -194,7 +194,6 @@ class EventScraper:
             match = re.search(pattern, body_text, re.IGNORECASE)
             if match:
                 speaker = match.group(1).strip()
-                print(speaker)
                 speaker = re.sub(r"\bHerrn\b", "Herr", speaker, flags=re.IGNORECASE)
                 return speaker.replace("\n", " ").strip()
         return "N/A"
