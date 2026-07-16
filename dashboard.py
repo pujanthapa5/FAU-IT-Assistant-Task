@@ -113,15 +113,22 @@ def make_split_charts(data, show_header=False):
     hums = [d['Hum'] for d in data]
 
     now = datetime.now()
-    end_time = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-    start_time = end_time - timedelta(hours=12)
+    
+    end_time_12h = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    start_time_12h = end_time_12h - timedelta(hours=12)
 
-    visible_temps = [d['Temp'] for d in data if d['Time'] >= start_time]
-    visible_hums = [d['Hum'] for d in data if d['Time'] >= start_time]
+    end_time_30m = now + timedelta(minutes=1)
+    start_time_30m = now - timedelta(minutes=30)
 
-    if visible_temps and visible_hums:
-        min_temp, max_temp = min(visible_temps), max(visible_temps)
-        min_hum, max_hum = min(visible_hums), max(visible_hums)
+    visible_temps_12h = [d['Temp'] for d in data if d['Time'] >= start_time_12h]
+    visible_hums_12h = [d['Hum'] for d in data if d['Time'] >= start_time_12h]
+
+    visible_temps_30m = [d['Temp'] for d in data if d['Time'] >= start_time_30m]
+    visible_hums_30m = [d['Hum'] for d in data if d['Time'] >= start_time_30m]
+
+    if visible_temps_12h and visible_hums_12h:
+        min_temp, max_temp = min(visible_temps_12h), max(visible_temps_12h)
+        min_hum, max_hum = min(visible_hums_12h), max(visible_hums_12h)
     elif temps and hums:
         min_temp, max_temp = min(temps), max(temps)
         min_hum, max_hum = min(hums), max(hums)
@@ -132,68 +139,88 @@ def make_split_charts(data, show_header=False):
     temp_padding = max(0.5, (max_temp - min_temp) * 0.1)
     hum_padding = max(2.0, (max_hum - min_hum) * 0.1)
     
-    temp_range = [min_temp - temp_padding, max_temp + temp_padding]
-    hum_range = [min_hum - hum_padding, max_hum + hum_padding]
+    temp_range_12h = [min_temp - temp_padding, max_temp + temp_padding]
+    hum_range_12h = [min_hum - hum_padding, max_hum + hum_padding]
+
+    if visible_temps_30m and visible_hums_30m:
+        min_temp_30m, max_temp_30m = min(visible_temps_30m), max(visible_temps_30m)
+        min_hum_30m, max_hum_30m = min(visible_hums_30m), max(visible_hums_30m)
+    else:
+        min_temp_30m, max_temp_30m = min_temp, max_temp
+        min_hum_30m, max_hum_30m = min_hum, max_hum
+
+    temp_padding_30m = max(0.2, (max_temp_30m - min_temp_30m) * 0.1)
+    hum_padding_30m = max(1.0, (max_hum_30m - min_hum_30m) * 0.1)
+
+    temp_range_30m = [min_temp_30m - temp_padding_30m, max_temp_30m + temp_padding_30m]
+    hum_range_30m = [min_hum_30m - hum_padding_30m, max_hum_30m + hum_padding_30m]
 
     fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.15
+        rows=4, cols=1,
+        shared_xaxes=False,
+        vertical_spacing=0.08,
+        row_heights=[0.35, 0.15, 0.35, 0.15]
     )
 
     fig.add_trace(
         go.Scatter(
-            x=times, y=temps,
-            mode="lines",
+            x=times, y=temps, mode="lines",
             line=dict(color="orange", width=3),
-            name="Temperature Trend",
+            name="Temperature Trend (12h)",
             hovertemplate="%{x|%H:%M:%S}<br>%{y:.1f} °C<extra></extra>",
             cliponaxis=False
-        ),
-        row=1, col=1
+        ), row=1, col=1
     )
 
     fig.add_trace(
         go.Scatter(
-            x=times, y=hums,
-            mode="lines",
+            x=times, y=temps, mode="lines",
+            line=dict(color="orange", width=4, shape="spline"),
+            name="Temperature (30m)",
+            hovertemplate="%{x|%H:%M:%S}<br>%{y:.1f} °C<extra></extra>",
+            cliponaxis=False
+        ), row=2, col=1
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=times, y=hums, mode="lines",
             line=dict(color="lightblue", width=3),
-            name="Humidity Trend",
+            name="Humidity Trend (12h)",
             hovertemplate="%{x|%H:%M:%S}<br>%{y:.1f} %<extra></extra>",
             cliponaxis=False
-        ),
-        row=2, col=1
+        ), row=3, col=1
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=times, y=hums, mode="lines",
+            line=dict(color="lightblue", width=4, shape="spline"),
+            name="Humidity (30m)",
+            hovertemplate="%{x|%H:%M:%S}<br>%{y:.1f} %<extra></extra>",
+            cliponaxis=False
+        ), row=4, col=1
     )
 
     tick_font_x = dict(size=30, color="lightgray")
-
-    fig.update_xaxes(
-        range=[start_time, end_time], dtick=3600000, tickformat="%H:%M",
-        tickangle=-45, tickfont=tick_font_x, gridcolor="rgba(255,255,255,0.1)",
-        row=1, col=1
-    )
+    tick_font_y = dict(size=30, color="lightgray")
+    tick_font_y_small = dict(size=24, color="lightgray")
     
-    fig.update_xaxes(
-        range=[start_time, end_time], dtick=3600000, tickformat="%H:%M",
-        tickangle=-45, tickfont=tick_font_x, gridcolor="rgba(255,255,255,0.1)",
-        row=2, col=1
-    )
+    title_font = dict(size=28, color="white")
+    title_font_small = dict(size=22, color="white")
 
-    fig.update_yaxes(
-        visible=True, range=temp_range, dtick=0.5,
-        tickfont=dict(size=30, color="lightgray"), gridcolor="rgba(255,255,255,0.1)",
-        title=dict(text="Temp (°C)", font=dict(size=28, color="white")),
-        row=1, col=1
-    )
-    fig.update_yaxes(
-        visible=True, range=hum_range, dtick=1,
-        tickfont=dict(size=30, color="lightgray"), gridcolor="rgba(255,255,255,0.1)",
-        title=dict(text="Hum (%)", font=dict(size=28, color="white")),
-        row=2, col=1
-    )
+    fig.update_xaxes(range=[start_time_12h, end_time_12h], dtick=3600000, tickformat="%H:%M", tickangle=-45, tickfont=tick_font_x, gridcolor="rgba(255,255,255,0.1)", row=1, col=1)
+    fig.update_xaxes(range=[start_time_30m, end_time_30m], dtick=300000, tickformat="%H:%M", tickangle=-45, tickfont=tick_font_x, gridcolor="rgba(255,255,255,0.1)", row=2, col=1)
+    fig.update_xaxes(range=[start_time_12h, end_time_12h], dtick=3600000, tickformat="%H:%M", tickangle=-45, tickfont=tick_font_x, gridcolor="rgba(255,255,255,0.1)", row=3, col=1)
+    fig.update_xaxes(range=[start_time_30m, end_time_30m], dtick=300000, tickformat="%H:%M", tickangle=-45, tickfont=tick_font_x, gridcolor="rgba(255,255,255,0.1)", row=4, col=1)
+
+    fig.update_yaxes(visible=True, range=temp_range_12h, dtick=0.5, tickfont=tick_font_y, gridcolor="rgba(255,255,255,0.1)", title=dict(text="Temp (°C)", font=title_font), row=1, col=1)
+    fig.update_yaxes(visible=True, range=temp_range_30m, dtick=0.2, tickfont=tick_font_y_small, gridcolor="rgba(255,255,255,0.1)", title=dict(text="30m (°C)", font=title_font_small), row=2, col=1)
+    fig.update_yaxes(visible=True, range=hum_range_12h, dtick=1, tickfont=tick_font_y, gridcolor="rgba(255,255,255,0.1)", title=dict(text="Hum (%)", font=title_font), row=3, col=1)
+    fig.update_yaxes(visible=True, range=hum_range_30m, dtick=1, tickfont=tick_font_y_small, gridcolor="rgba(255,255,255,0.1)", title=dict(text="30m (%)", font=title_font_small), row=4, col=1)
 
     fig.update_layout(
-        height=1400, showlegend=False,
+        height=1600, showlegend=False,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         margin=dict(t=120, b=80, l=10, r=10)
     )
@@ -201,8 +228,8 @@ def make_split_charts(data, show_header=False):
     if show_header:
         fig.update_layout(
             annotations=[
-                dict(x=0.5, y=1.05, xref='paper', yref='paper', text='Temperature Trend', showarrow=False, font=dict(size=55, color="white"), xanchor='center'),
-                dict(x=0.5, y=0.45, xref='paper', yref='paper', text='Humidity Trend', showarrow=False, font=dict(size=55, color="white"), xanchor='center')
+                dict(x=0.5, y=1.04, xref='paper', yref='paper', text='Temperature Trend', showarrow=False, font=dict(size=55, color="white"), xanchor='center'),
+                dict(x=0.5, y=0.48, xref='paper', yref='paper', text='Humidity Trend', showarrow=False, font=dict(size=55, color="white"), xanchor='center')
             ]
         )
 
