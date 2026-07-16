@@ -108,17 +108,32 @@ history_data = st.session_state.history
 
 
 def make_split_charts(data, show_header=False):
-    from collections import OrderedDict
+    times = [d['Time'] for d in data]
+    temps = [d['Temp'] for d in data]
+    hums = [d['Hum'] for d in data]
+
+    now = datetime.now()
+    end_time = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    start_time = end_time - timedelta(hours=12)
+
+    visible_temps = [d['Temp'] for d in data if d['Time'] >= start_time]
+    visible_hums = [d['Hum'] for d in data if d['Time'] >= start_time]
+
+    if visible_temps and visible_hums:
+        min_temp, max_temp = min(visible_temps), max(visible_temps)
+        min_hum, max_hum = min(visible_hums), max(visible_hums)
+    elif temps and hums:
+        min_temp, max_temp = min(temps), max(temps)
+        min_hum, max_hum = min(hums), max(hums)
+    else:
+        min_temp, max_temp = 20, 30
+        min_hum, max_hum = 25, 45
+
+    temp_padding = max(0.5, (max_temp - min_temp) * 0.1)
+    hum_padding = max(2.0, (max_hum - min_hum) * 0.1)
     
-    hourly_data = OrderedDict()
-    for d in data:
-        hour_key = d['Time'].replace(minute=0, second=0, microsecond=0)
-        hourly_data[hour_key] = d
-        
-    sorted_hours = sorted(hourly_data.keys())
-    times = sorted_hours
-    temps = [hourly_data[h]['Temp'] for h in sorted_hours]
-    hums = [hourly_data[h]['Hum'] for h in sorted_hours]
+    temp_range = [min_temp - temp_padding, max_temp + temp_padding]
+    hum_range = [min_hum - hum_padding, max_hum + hum_padding]
 
     fig = make_subplots(
         rows=2, cols=1,
@@ -129,10 +144,10 @@ def make_split_charts(data, show_header=False):
     fig.add_trace(
         go.Scatter(
             x=times, y=temps,
-            mode="lines+markers",
-            line=dict(color="orange", width=5),
-            marker=dict(size=12),
+            mode="lines",
+            line=dict(color="orange", width=3),
             name="Temperature Trend",
+            hovertemplate="%{x|%H:%M:%S}<br>%{y:.1f} °C<extra></extra>",
             cliponaxis=False
         ),
         row=1, col=1
@@ -141,20 +156,16 @@ def make_split_charts(data, show_header=False):
     fig.add_trace(
         go.Scatter(
             x=times, y=hums,
-            mode="lines+markers",
-            line=dict(color="lightblue", width=5),
-            marker=dict(size=12),
+            mode="lines",
+            line=dict(color="lightblue", width=3),
             name="Humidity Trend",
+            hovertemplate="%{x|%H:%M:%S}<br>%{y:.1f} %<extra></extra>",
             cliponaxis=False
         ),
         row=2, col=1
     )
 
     tick_font_x = dict(size=30, color="lightgray")
-
-    now = datetime.now()
-    end_time = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-    start_time = end_time - timedelta(hours=12)
 
     fig.update_xaxes(
         range=[start_time, end_time], dtick=3600000, tickformat="%H:%M",
@@ -169,13 +180,13 @@ def make_split_charts(data, show_header=False):
     )
 
     fig.update_yaxes(
-        visible=True, range=[20, 30], dtick=2,
+        visible=True, range=temp_range, dtick=0.5,
         tickfont=dict(size=30, color="lightgray"), gridcolor="rgba(255,255,255,0.1)",
         title=dict(text="Temp (°C)", font=dict(size=28, color="white")),
         row=1, col=1
     )
     fig.update_yaxes(
-        visible=True, range=[25, 45], dtick=5,
+        visible=True, range=hum_range, dtick=1,
         tickfont=dict(size=30, color="lightgray"), gridcolor="rgba(255,255,255,0.1)",
         title=dict(text="Hum (%)", font=dict(size=28, color="white")),
         row=2, col=1
