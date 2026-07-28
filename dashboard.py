@@ -194,30 +194,6 @@ def make_split_charts(data, show_header=False):
         ), row=2, col=1
     )
 
-    # Inset for Temperature (30m)
-    fig.add_trace(
-        go.Scatter(
-            x=times, y=temps, mode="lines",
-            line=dict(color="orange", width=4, shape="spline"),
-            name="Temperature (30m)",
-            hovertemplate="%{x|%H:%M:%S}<br>%{y:.1f} °C<extra></extra>",
-            cliponaxis=False,
-            xaxis="x3", yaxis="y3"
-        )
-    )
-
-    # Inset for Humidity (30m)
-    fig.add_trace(
-        go.Scatter(
-            x=times, y=hums, mode="lines",
-            line=dict(color="lightblue", width=4, shape="spline"),
-            name="Humidity (30m)",
-            hovertemplate="%{x|%H:%M:%S}<br>%{y:.1f} %<extra></extra>",
-            cliponaxis=False,
-            xaxis="x4", yaxis="y4"
-        )
-    )
-
     tick_font_x = dict(size=30, color="lightgray")
     title_font = dict(size=28, color="white")
 
@@ -228,13 +204,6 @@ def make_split_charts(data, show_header=False):
     fig.update_yaxes(visible=True, range=hum_range_12h, dtick=1, tickfont=dict(size=30, color="lightgray"), gridcolor="rgba(255,255,255,0.1)", title=dict(text="Hum (%)", font=title_font), row=2, col=1)
 
     fig.update_layout(
-        # Position Temperature inset in top-right of Row 1 (y domain approx 0.575 to 1.0)
-        xaxis3=dict(domain=[0.8, 0.98], range=[start_time_30m, end_time_30m], anchor='y3', showticklabels=False, showgrid=True, gridcolor="rgba(255,255,255,0.05)", zeroline=False),
-        yaxis3=dict(domain=[0.75, 0.95], range=temp_range_30m, anchor='x3', showticklabels=False, showgrid=True, gridcolor="rgba(255,255,255,0.05)", zeroline=False),
-        
-        # Position Humidity inset in top-right of Row 2 (y domain approx 0.0 to 0.425)
-        xaxis4=dict(domain=[0.8, 0.98], range=[start_time_30m, end_time_30m], anchor='y4', showticklabels=False, showgrid=True, gridcolor="rgba(255,255,255,0.05)", zeroline=False),
-        yaxis4=dict(domain=[0.175, 0.375], range=hum_range_30m, anchor='x4', showticklabels=False, showgrid=True, gridcolor="rgba(255,255,255,0.05)", zeroline=False),
         
         height=1400, showlegend=False,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
@@ -271,8 +240,23 @@ if st.session_state.page == 'dashboard':
                 temp = room_data['temperature']
                 hum = room_data['humidity']
 
+                temp_alarm = ' <span style="color: red; animation: blink 1s linear infinite; font-size: 80px;">⚠️</span>' if temp < 15 or temp > 35 else ""
+                hum_alarm = ' <span style="color: red; animation: blink 1s linear infinite; font-size: 80px;">⚠️</span>' if hum < 28 or hum > 28 else ""
+
                 st.markdown(
-                    f"""<div style="font-size: 90px; text-align:center;">🌡️ {temp:.2f} °C <br>💧 {hum:.2f} %</div>""",
+                    f"""
+                    <style>
+                    @keyframes blink {{
+                        0% {{ opacity: 1; }}
+                        50% {{ opacity: 0; }}
+                        100% {{ opacity: 1; }}
+                    }}
+                    </style>
+                    <div style="font-size: 90px; text-align:center;">
+                        🌡️ {temp:.2f} °C{temp_alarm} <br>
+                        💧 {hum:.2f} %{hum_alarm}
+                    </div>
+                    """,
                     unsafe_allow_html=True
                 )
 
