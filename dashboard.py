@@ -241,7 +241,7 @@ if st.session_state.page == 'dashboard':
                 hum = room_data['humidity']
 
                 temp_alarm = ' <span style="color: red; animation: blink 1s linear infinite; font-size: 80px;">⚠️</span>' if temp < 15 or temp > 35 else ""
-                hum_alarm = ' <span style="color: red; animation: blink 1s linear infinite; font-size: 80px;">⚠️</span>' if hum < 28 or hum > 28 else ""
+                hum_alarm = ' <span style="color: red; animation: blink 1s linear infinite; font-size: 80px;">⚠️</span>' if hum < 28 or hum > 55 else ""
 
                 st.markdown(
                     f"""
