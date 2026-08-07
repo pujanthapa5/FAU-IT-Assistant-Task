@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import time
 from datetime import datetime, timedelta
 import queue
@@ -26,6 +27,32 @@ st.markdown("""
         div.block-container {padding-top: 1rem;} 
     </style>
 """, unsafe_allow_html=True)
+
+# ============================================================
+# FIX #1: Force a real, full browser reload on a schedule.
+# st.rerun() never actually reloads the tab, so any memory that
+# Chromium/Plotly/Streamlit doesn't release slowly builds up over
+# days of 24/7 uptime. This guarantees a hard reset regardless of
+# where a leak comes from. The deadline is stored in session_state
+# so it survives reruns and only fires once, then resets itself
+# after the real page reload starts a new session.
+# ============================================================
+RELOAD_INTERVAL_SECONDS = 6 * 60 * 60  # reload every 6 hours; adjust as needed
+
+if 'reload_deadline' not in st.session_state:
+    st.session_state.reload_deadline = time.time() + RELOAD_INTERVAL_SECONDS
+
+remaining_ms = max(0, int((st.session_state.reload_deadline - time.time()) * 1000))
+components.html(
+    f"""
+    <script>
+        setTimeout(function() {{
+            window.parent.location.reload();
+        }}, {remaining_ms});
+    </script>
+    """,
+    height=0,
+)
 
 if 'data_queue' not in st.session_state:
     st.session_state.data_queue = queue.Queue()
@@ -107,7 +134,7 @@ while not data_queue.empty():
         st.session_state.latest_screenshot_data = item
         st.session_state.screenshot_active = True
         st.session_state.last_screenshot_signal = time.time()
-    
+
     if item.get('type') == 'screenshot_status':
         st.session_state.screenshot_active = item.get('active', False)
         st.session_state.last_screenshot_signal = time.time()
@@ -116,6 +143,17 @@ if st.session_state.screenshot_active:
     if time.time() - st.session_state.last_screenshot_signal > 300:
         st.session_state.screenshot_active = False
 
+# ============================================================
+# FIX #2: Drop history older than what any chart actually shows
+# (12h window + a little buffer). Previously the full 10,000-row
+# history was kept in memory and the whole per-room slice was
+# handed to Plotly every rerun, even though only ~12h is ever
+# displayed. This keeps memory bounded AND makes every chart
+# rebuild cheaper for the browser.
+# ============================================================
+HISTORY_RETENTION = timedelta(hours=13)
+history_cutoff = datetime.now() - HISTORY_RETENTION
+st.session_state.history = [d for d in st.session_state.history if d['Time'] >= history_cutoff]
 
 history_data = st.session_state.history
 
@@ -126,18 +164,12 @@ def make_split_charts(data, show_header=False):
     hums = [d['Hum'] for d in data]
 
     now = datetime.now()
-    
+
     end_time_12h = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
     start_time_12h = end_time_12h - timedelta(hours=12)
 
-    end_time_30m = now + timedelta(minutes=1)
-    start_time_30m = now - timedelta(minutes=30)
-
     visible_temps_12h = [d['Temp'] for d in data if d['Time'] >= start_time_12h]
     visible_hums_12h = [d['Hum'] for d in data if d['Time'] >= start_time_12h]
-
-    visible_temps_30m = [d['Temp'] for d in data if d['Time'] >= start_time_30m]
-    visible_hums_30m = [d['Hum'] for d in data if d['Time'] >= start_time_30m]
 
     if visible_temps_12h and visible_hums_12h:
         min_temp, max_temp = min(visible_temps_12h), max(visible_temps_12h)
@@ -151,22 +183,9 @@ def make_split_charts(data, show_header=False):
 
     temp_padding = max(0.5, (max_temp - min_temp) * 0.1)
     hum_padding = max(2.0, (max_hum - min_hum) * 0.1)
-    
+
     temp_range_12h = [min_temp - temp_padding, max_temp + temp_padding]
     hum_range_12h = [min_hum - hum_padding, max_hum + hum_padding]
-
-    if visible_temps_30m and visible_hums_30m:
-        min_temp_30m, max_temp_30m = min(visible_temps_30m), max(visible_temps_30m)
-        min_hum_30m, max_hum_30m = min(visible_hums_30m), max(visible_hums_30m)
-    else:
-        min_temp_30m, max_temp_30m = min_temp, max_temp
-        min_hum_30m, max_hum_30m = min_hum, max_hum
-
-    temp_padding_30m = max(0.2, (max_temp_30m - min_temp_30m) * 0.1)
-    hum_padding_30m = max(1.0, (max_hum_30m - min_hum_30m) * 0.1)
-
-    temp_range_30m = [min_temp_30m - temp_padding_30m, max_temp_30m + temp_padding_30m]
-    hum_range_30m = [min_hum_30m - hum_padding_30m, max_hum_30m + hum_padding_30m]
 
     fig = make_subplots(
         rows=2, cols=1,
@@ -204,7 +223,6 @@ def make_split_charts(data, show_header=False):
     fig.update_yaxes(visible=True, range=hum_range_12h, dtick=1, tickfont=dict(size=30, color="lightgray"), gridcolor="rgba(255,255,255,0.1)", title=dict(text="Hum (%)", font=title_font), row=2, col=1)
 
     fig.update_layout(
-        
         height=1400, showlegend=False,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         margin=dict(t=120, b=80, l=10, r=10)
@@ -260,23 +278,24 @@ if st.session_state.page == 'dashboard':
                     unsafe_allow_html=True
                 )
 
+                # FIX #2 (continued): only pull the visible-window slice per room
                 room_data_list = [d for d in history_data if d['Room'] == room_id]
 
                 if room_data_list:
                     show_header = (room_id == "room-2")
                     st.plotly_chart(make_split_charts(room_data_list, show_header=show_header), use_container_width=True, config={'staticPlot': True})
 
-                if (room_id == "room-1" and 
-                    st.session_state.screenshot_active and 
-                    'latest_screenshot' in st.session_state and 
+                if (room_id == "room-1" and
+                    st.session_state.screenshot_active and
+                    'latest_screenshot' in st.session_state and
                     st.session_state.latest_screenshot):
-                    
+
                     st.markdown("---")
                     st.markdown("<h3 style='text-align:center; font-size: 45px;'>📸 Live View</h3>", unsafe_allow_html=True)
                     screenshot_data = st.session_state.latest_screenshot_data
                     image_url = st.session_state.latest_screenshot
                     st.image(
-                        image_url, 
+                        image_url,
                         caption=f"Captured: {screenshot_data.get('window_title', 'Unknown')} at {st.session_state.latest_screenshot_timestamp}",
                         use_container_width=True
                     )
@@ -294,7 +313,7 @@ elif st.session_state.page == 'info':
     if events:
         idx = st.session_state.event_index % len(events)
         ev = events[idx]
-        
+
         st.markdown(
             textwrap.dedent(f"""
                 <style>
@@ -327,7 +346,6 @@ elif st.session_state.page == 'info':
     st.session_state.page = 'website'
 
 elif st.session_state.page == 'website':
-    # 1. Remove Streamlit's default padding for a true "Full Screen" look
     st.markdown("""
         <style>
             .main .block-container {
@@ -340,16 +358,9 @@ elif st.session_state.page == 'website':
         </style>
     """, unsafe_allow_html=True)
 
-    # 2. Define the Embed Logic
-    # --- EDIT THESE VALUES TO ADJUST FOR 42" MONITOR AND HIDE COOKIE BANNER ---
-    zoom_level = 1.3      # Adjust to make text readable on large screen (1.5 to 2.5)
-    top_crop_vh = 25      # Cuts the top part (header). Increase if not enough.
-    
-    # ⚠️ CRITICAL: To hide the cookie banner, this number must be LARGE enough to push 
-    # the bottom of the website completely off the screen. 
-    # If you see the cookie banner, INCREASE this number (e.g., to 40 or 50)!
+    zoom_level = 1.3
+    top_crop_vh = 25
     bottom_crop_vh = 40
-    # --------------------------------------------------------------------------
 
     st.markdown(f"""
         <div style="
@@ -381,16 +392,14 @@ elif st.session_state.page == 'website':
     st.session_state.page = 'custom_event'
 
 elif st.session_state.page == 'custom_event':
-    # ==== EDIT THESE ONLY ====
     event_title = ""
     event_place = ""
     event_time = ""
-    event_image = ""  # URL or local path to your image
-    # =========================
+    event_image = ""
 
     if event_title and event_place and event_time:
         image_html = f'<img src="{event_image}" style="max-height: 25vh; margin-top: 30px; border-radius: 10px; box-shadow: 0px 4px 15px rgba(0,0,0,0.5); object-fit: contain;">' if event_image else ""
-        
+
         html_code = f"""
 <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 9999; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; background: radial-gradient(circle at center, #1a1a2e 0%, #0f0f1a 100%); color: white; padding: 50px; box-sizing: border-box; font-family: 'Inter', sans-serif;">
     <h1 style="font-size: 8vmin; margin-bottom: 40px; color: #ffffff; border-bottom: 3px solid #4DA8FF; padding-bottom: 20px; width: 80%; line-height: 1.2;">
